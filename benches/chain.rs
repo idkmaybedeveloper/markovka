@@ -1,8 +1,22 @@
+use clap::Parser;
 use markovka::MarkovChain;
 use rand::{SeedableRng, rngs::StdRng};
+use std::fs;
 use std::hint::black_box;
+use std::io;
 use std::num::NonZeroUsize;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+
+#[derive(Parser)]
+struct BenchArgs {
+    #[arg(long, value_name = "PATH", help = "train on a corpus file")]
+    corpus: Option<PathBuf>,
+    #[arg(long, requires = "corpus", help = "max words (default: 1000000)")]
+    word_limit: Option<NonZeroUsize>,
+    #[arg(long = "bench", hide = true)]
+    _bench: bool,
+}
 
 fn measure(name: &str, mut run: impl FnMut() -> usize) {
     let mut iterations = 1;
@@ -34,7 +48,41 @@ fn measure(name: &str, mut run: impl FnMut() -> usize) {
     );
 }
 
+fn measure_corpus(path: &Path, word_limit: usize) -> io::Result<()> {
+    let read_start = Instant::now();
+    let bytes = fs::read(path)?;
+    let text = String::from_utf8_lossy(&bytes);
+    let read_time = read_start.elapsed();
+
+    let mut chain = MarkovChain::new(NonZeroUsize::new(2).unwrap());
+    let mut words = 0;
+    let train_start = Instant::now();
+    chain.train(text.split_whitespace().take(word_limit).inspect(|_| words += 1));
+    let train_time = train_start.elapsed();
+    black_box(chain);
+    if words == 0 {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "corpus has no words"));
+    }
+
+    println!("corpus bytes: {}", bytes.len());
+    println!("read and decode: {:.3} s", read_time.as_secs_f64());
+    println!(
+        "trained: {words} words in {:.3} s, {:.1} ns/word, {:.1} million words/s",
+        train_time.as_secs_f64(),
+        train_time.as_secs_f64() * 1e9 / words as f64,
+        words as f64 / train_time.as_secs_f64() / 1e6
+    );
+    Ok(())
+}
+
 fn main() {
+    let args = BenchArgs::parse();
+    if let Some(path) = args.corpus {
+        let word_limit = args.word_limit.map_or(1_000_000, NonZeroUsize::get);
+        measure_corpus(&path, word_limit).unwrap();
+        return;
+    }
+
     let order = NonZeroUsize::new(2).unwrap();
     let repeated: Vec<_> = (0..1_000).map(|i| format!("word{}", i % 16)).collect();
     let diverse: Vec<_> = (0..1_000).map(|i| format!("word{i}")).collect();
