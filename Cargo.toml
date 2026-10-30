@@ -1,0 +1,12 @@
+[package]
+name = "markovka"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+hashbrown = "0.17"
+rand = "0.10"
+
+[[bench]]
+name = "chain"
+harness = false
